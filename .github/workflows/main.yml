@@ -1,0 +1,83 @@
+name: Build ImmortalWrt
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_BRANCH: master # Hoặc nhánh bạn cần, ví dụ: openwrt-23.05
+  CONFIG_FILE: .config
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Prepare environment (Cài đặt môi trường)
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev file wget
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+
+    - name: Clone ImmortalWrt source code
+      run: |
+        # Đã sửa: Clone thẳng vào thư mục có tên immortalwrt
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+
+    - name: Update & Install feeds
+      working-directory: ./immortalwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Load custom files (Thêm script uci-defaults PPPoE & WireGuard)
+      run: |
+        # Đã sửa: Copy vào đúng thư mục immortalwrt/files
+        if [ -d "files" ]; then
+          mkdir -p immortalwrt/files
+          cp -r files/* immortalwrt/files/
+          chmod +x immortalwrt/files/etc/uci-defaults/*
+          echo "Đã thêm các script uci-defaults và cấp quyền thực thi."
+        fi
+
+    - name: Load custom configuration
+      run: |
+        # Đã sửa: Trỏ đúng vào thư mục immortalwrt
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE immortalwrt/.config
+        cd immortalwrt
+        
+        # Đảm bảo các package WireGuard được chọn để script uci hoạt động
+        echo "CONFIG_PACKAGE_kmod-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
+        
+        make defconfig
+
+    - name: Download packages
+      working-directory: ./immortalwrt
+      run: |
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile the firmware
+      working-directory: ./immortalwrt
+      run: |
+        echo -e "Bắt đầu compile với $(nproc) luồng..."
+        make -j$(nproc) || make -j1 || make -j1 V=s
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: ImmortalWrt_Firmware
+        # Đã sửa: Lấy file xuất ra từ thư mục immortalwrt
+        path: immortalwrt/bin/targets/
