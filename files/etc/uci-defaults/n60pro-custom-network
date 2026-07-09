@@ -55,6 +55,51 @@ cfg_find_wan_zone() {
 config_load firewall
 config_foreach cfg_find_wan_zone zone
 
+# --- CẤU HÌNH WI-FI ĐỘNG (BẬT 5G, THIẾT LẬP WPA3 THUẦN) ---
+
+# Bắt hệ thống nhận diện phần cứng và sinh file cấu hình Wi-Fi
+[ -f /etc/config/wireless ] || wifi config
+
+. /lib/functions.sh
+config_load wireless
+
+change_wifi() {
+    local config="$1"
+    local device
+    
+    config_get device "$config" device
+
+    local band
+    config_get band "$device" band
+
+    if [ "$band" = "2g" ]; then
+        # Tắt phần cứng 2.4GHz
+        uci set wireless."$device".disabled='1'
+        
+    elif [ "$band" = "5g" ]; then
+        # Bật phần cứng 5GHz
+        uci set wireless."$device".disabled='0'
+        
+        # Thiết lập tên
+        uci set wireless."$config".ssid='DKM VIETTEL'
+        
+        # Thiết lập chuẩn WPA3-SAE (Không trộn lẫn)
+        uci set wireless."$config".encryption='sae' 
+        uci set wireless."$config".key='12344321'
+        
+        # BẮT BUỘC ĐỐI VỚI WPA3: Thiết lập PMF thành 2 (Required)
+        uci set wireless."$config".ieee80211w='2'
+    fi
+}
+
+# Quét tất cả các interface Wi-Fi và áp dụng logic trên
+config_foreach change_wifi wifi-iface
+
+# Lưu cấu hình và khởi động lại dịch vụ Wi-Fi
+uci commit wireless
+
+
+
 # Lưu toàn bộ cấu hình
 uci commit network
 uci commit firewall
@@ -62,7 +107,7 @@ uci commit firewall
 # Khởi động lại dịch vụ để áp dụng ngay
 /etc/init.d/network restart
 /etc/init.d/firewall restart
-
+wifi reload
 # Xóa script để không chạy lại ở lần boot sau
 rm -f /etc/uci-defaults/n60pro-custom-network
 exit 0
