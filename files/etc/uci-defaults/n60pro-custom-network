@@ -95,6 +95,27 @@ change_wifi() {
 # Quét tất cả các interface Wi-Fi và áp dụng logic trên
 config_foreach change_wifi wifi-iface
 
+# --- DỌN SẠCH TOÀN BỘ CẤU HÌNH ĐỊNH TUYẾN CỦA MWAN3 ---
+
+if [ -f /etc/config/mwan3 ]; then
+    # Vòng lặp xóa toàn bộ các cổng mạng (interface)
+    while uci -q delete mwan3.@interface[0]; do :; done
+    
+    # Vòng lặp xóa toàn bộ các thành viên (member)
+    while uci -q delete mwan3.@member[0]; do :; done
+    
+    # Vòng lặp xóa toàn bộ các chính sách (policy)
+    while uci -q delete mwan3.@policy[0]; do :; done
+
+    # Vòng lặp xóa toàn bộ các luật định tuyến (rule)
+    while uci -q delete mwan3.@rule[0]; do :; done
+
+    # Lưu cấu hình và khởi động lại dịch vụ mwan3
+    uci commit mwan3
+    /etc/init.d/mwan3 restart
+fi
+
+
 # Lưu cấu hình và khởi động lại dịch vụ Wi-Fi
 uci commit wireless
 
