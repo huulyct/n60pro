@@ -10,8 +10,8 @@ uci -q delete network.wan6
 uci set network.wan=interface
 uci set network.wan.proto='pppoe'
 uci set network.wan.device='eth1'
-uci set network.wan.username='c710_gftth_tunt162'
-uci set network.wan.password='O8WIYG'
+uci set network.wan.username='user'
+uci set network.wan.password='password'
 uci set network.wan.ipv6='0'
 uci set network.wan.mtu='1492'
 uci set network.wan.peerdns='0'
@@ -23,37 +23,7 @@ uci set network.wan.multipath='off'
 
 
 # 2. Tạo Interface WireGuard một cách an toàn (Xóa cái cũ nếu trùng tên)
-uci set network.sg=interface
-uci set network.sg.proto='wireguard'
-uci add network wireguard_sg
-uci set network.@wireguard_sg[-1].description='Imported peer configuration'
-uci set network.@wireguard_sg[-1].public_key='MGfgkhJsMVMTO33h1wr76+z6gQr/93VcGdClfbaPsnU='
-uci add_list network.@wireguard_sg[-1].allowed_ips='0.0.0.0/0'
-uci set network.@wireguard_sg[-1].endpoint_host='sg-sng.prod.surfshark.com'
-uci set network.@wireguard_sg[-1].endpoint_port='51820'
-uci set network.sg.private_key='SIMVtI2UGwIRNkStqfv5/9TKgqxlg3lkVH4aD6HoSWM='
-uci add_list network.sg.addresses='10.14.0.2/16'
-uci add_list network.sg.dns='162.252.172.57'
-uci add_list network.sg.dns='149.154.159.92'
-uci set network.sg.multipath='off'
-uci set network.sg.dns_metric='50'
-uci set network.sg.metric='50'
-uci set network.@wireguard_sg[-1].route_allowed_ips='1'
-uci set network.@wireguard_sg[-1].persistent_keepalive='25'
 
-
-# 4. Thêm sg vào Firewall WAN một cách linh hoạt
-cfg_find_wan_zone() {
-    local cfg="$1"
-    local name
-    config_get name "$cfg" name
-    if [ "$name" = "wan" ]; then
-        uci add_list firewall."$cfg".network='sg'
-    fi
-}
-. /lib/functions.sh
-config_load firewall
-config_foreach cfg_find_wan_zone zone
 
 # --- CẤU HÌNH WI-FI ĐỘNG (BẬT 5G, THIẾT LẬP WPA3 THUẦN) ---
 
