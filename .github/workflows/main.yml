@@ -53,13 +53,6 @@ jobs:
         # Đã sửa: Trỏ đúng vào thư mục immortalwrt
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE immortalwrt/.config
         cd immortalwrt
-        
-        # Đảm bảo các package WireGuard được chọn để script uci hoạt động
-        echo "CONFIG_PACKAGE_kmod-wireguard=y" >> .config
-        echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
-        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
-        
         make defconfig
 
     - name: Download packages
