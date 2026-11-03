@@ -1,122 +1,106 @@
-name: Build ImmortalWrt BE12 Pro
+name: Build ImmortalWrt (Ubuntu Latest)
 
 on:
   workflow_dispatch:
-  # Bỏ comment 2 dòng dưới nếu muốn tự động chạy khi push file .config
-   push:
-     paths:
-       - '.config'
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master
+  REPO_BRANCH: master # Hoặc nhánh cụ thể như openwrt-23.05, openwrt-24.10
   CONFIG_FILE: .config
-  DIY_SH: diy-part1.sh
-  DIY_SH2: diy-part2.sh
-  TZ: Asia/Ho_Chi_Minh
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v5
 
-      - name: Free up disk space & Install dependencies (Ubuntu 24.04 Safe)
-        run: |
-          # Giải phóng dung lượng an toàn, KHÔNG xóa ubuntu.sources của Ubuntu 24.04
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force || true
+    - name: Prepare environment (Tối ưu cho Ubuntu 24.04 & chống lỗi gn)
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        # Xóa các repo bên thứ 3 nhưng GIỮ LẠI ubuntu.sources của Ubuntu 24.04
+        sudo find /etc/apt/sources.list.d/ -type f ! -name 'ubuntu.sources' -delete
+        
+        # Giải phóng dung lượng ổ cứng của runner
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        
+        # Cập nhật và cài đặt các gói phụ thuộc đã chuẩn hóa cho Ubuntu 24.04
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+          g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+          libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev python3-dev \
+          libreadline-dev libssl-dev libtool libyaml-dev zlib1g-dev lld llvm lrzsz genisoimage msmtp nano \
+          ninja-build generate-ninja p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply \
+          python3-docutils python3-pyelftools python3-setuptools qemu-utils re2c rsync scons squashfs-tools \
+          subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zstd
           
-          # Chỉ xóa các PPA bên thứ 3 gây chậm update, giữ nguyên ubuntu.sources gốc
-          sudo find /etc/apt/sources.list.d/ -type f ! -name 'ubuntu.sources' -delete
-          
-          sudo apt-get update -y
-          
-          # Danh sách gói chuẩn cho OpenWrt/ImmortalWrt trên Ubuntu 24.04 + hỗ trợ build gn/ninja
-          sudo apt-get install -y --no-install-recommends \
-            ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-            build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler \
-            ecj fastjar flex gawk gettext gcc-multilib g++-multilib git gnutls-dev \
-            gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
-            libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
-            libncurses-dev libpython3-dev libreadline-dev libssl-dev libtool \
-            liburing-dev libyaml-dev lld llvm lrzsz mkisofs msmtp nano \
-            ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip \
-            python3-ply python3-pyelftools python3-setuptools qemu-utils \
-            quilt rsync scons squashfs-tools subversion swig texinfo uglifyjs \
-            upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
 
-          sudo apt-get autoremove --purge -y
-          sudo apt-get clean
-          df -h
+    - name: Clone ImmortalWrt source code
+      run: |
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
 
-      - name: Clone ImmortalWrt Source Code
-        run: |
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
+    - name: Update, Install feeds & Fix gn build error
+      working-directory: ./immortalwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        
+        # Vá lỗi gói gn bị dừng do cảnh báo -Werror trên trình biên dịch mới của Ubuntu 24.04
+        find feeds/ -path "*/gn/Makefile" -exec sed -i 's/ ninja / ninja -v /g' {} + 2>/dev/null || true
+        find feeds/ -path "*/gn/Makefile" -exec sed -i '/Host\/Configure/a \	sed -i "s/-Werror/-Wno-error/g" $(HOST_BUILD_DIR)/build/gen.py' {} + 2>/dev/null || true
 
-      - name: Load custom feeds (Optional)
-        run: |
-          if [ -f "$DIY_SH" ]; then
-            chmod +x $DIY_SH
-            cd immortalwrt && ../$DIY_SH
-          fi
+    - name: Load custom files (Nạp script uci-defaults)
+      run: |
+        if [ -d "files" ]; then
+          mkdir -p immortalwrt/files
+          cp -r files/* immortalwrt/files/
+          chmod +x immortalwrt/files/etc/uci-defaults/*
+          echo "Đã nạp các script uci-defaults và cấp quyền thực thi."
+        fi
 
-      - name: Update & Install Feeds
-        working-directory: ./immortalwrt
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+    - name: Load custom configuration
+      run: |
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE immortalwrt/.config
+        cd immortalwrt
+        
+        # Đảm bảo các gói cho WireGuard Client được chọn
+        echo "CONFIG_PACKAGE_kmod-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
+        
+        # Đảm bảo các gói cho DNS-over-HTTPS và Dnsmasq-full được chọn
+        echo "CONFIG_PACKAGE_https-dns-proxy=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-https-dns-proxy=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq=m" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+        
+        # Đảm bảo hỗ trợ mã hóa WPA3-SAE cho Wi-Fi 5GHz
+        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config
+        
+        make defconfig
 
-      - name: Load Custom Configuration & Scripts
-        run: |
-          if [ -d "files" ]; then
-            cp -r files immortalwrt/files
-          fi
-          if [ -f "$CONFIG_FILE" ]; then
-            cp $CONFIG_FILE immortalwrt/.config
-          fi
-          if [ -f "$DIY_SH2" ]; then
-            chmod +x $DIY_SH2
-            cd immortalwrt && ../$DIY_SH2
-          fi
+    - name: Download packages
+      working-directory: ./immortalwrt
+      run: |
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-      - name: Download Packages
-        working-directory: ./immortalwrt
-        run: |
-          make defconfig
-          make download -j8
-          # Xóa các file tải lỗi (dưới 1KB) để tránh lỗi giải nén ở bước compile
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
+    - name: Compile the firmware
+      working-directory: ./immortalwrt
+      run: |
+        echo -e "Bắt đầu compile với $(nproc) luồng..."
+        make -j$(nproc) || make -j1 || make -j1 V=s
 
-      - name: Pre-build Host Tools (Fix gn & ninja host build)
-        working-directory: ./immortalwrt
-        run: |
-          echo "=== Building host tools & gn first ==="
-          make tools/compile -j$(nproc) || make tools/compile -j1 V=s
-          if grep -q "CONFIG_PACKAGE_gn=y\|CONFIG_PACKAGE_naiveproxy=y" .config 2>/dev/null || [ -d "feeds/packages/devel/gn" ]; then
-            make package/feeds/packages/ninja/host/compile -j$(nproc) || make package/feeds/packages/ninja/host/compile -j1 V=s
-            make package/feeds/packages/gn/host/compile -j$(nproc) || make package/feeds/packages/gn/host/compile -j1 V=s
-          fi
-
-      - name: Compile Firmware
-        working-directory: ./immortalwrt
-        run: |
-          echo "=== Starting Full Compilation with $(nproc) threads ==="
-          make -j$(nproc) || make -j1 V=s
-          echo "=== Disk Space After Build ==="
-          df -h
-
-      - name: Upload Firmware to Artifacts
-        uses: actions/upload-artifact@v4
-        if: always() && !cancelled()
-        with:
-          name: ImmortalWrt_N60Pro_Firmware
-          path: |
-            immortalwrt/bin/targets/*/*/*.bin
-            immortalwrt/bin/targets/*/*/*.itb
-            immortalwrt/bin/targets/*/*/*.img.gz
-            immortalwrt/bin/targets/*/*/sha256sums
-          if-no-files-found: ignore
+    - name: Upload firmware
+      uses: actions/upload-artifact@v5
+      with:
+        name: ImmortalWrt_Firmware
+        path: immortalwrt/bin/targets/
