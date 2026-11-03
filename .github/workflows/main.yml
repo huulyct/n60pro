@@ -1,121 +1,99 @@
-name: Build ImmortalWrt (Debian 11)
+name: Build ImmortalWrt
 
 on:
   workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: master # Hoặc openwrt-23.05, openwrt-24.10 tùy nhu cầu
+  REPO_BRANCH: master # Hoặc đổi sang nhánh cụ thể như openwrt-23.05, openwrt-24.10
   CONFIG_FILE: .config
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    # Khởi chạy môi trường Debian 11 (Bullseye)
-    container:
-      image: debian:bullseye
-      options: --user root
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
 
-    - name: Khởi tạo user và cấp quyền sudo (Bắt buộc trên Debian container)
+    - name: Prepare environment (Cài đặt đầy đủ các gói theo khuyến nghị của ImmortalWrt)
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        apt-get update -y
-        apt-get install -y sudo
-        # Tạo user 'builder' để không bị lỗi compile bằng quyền root của OpenWrt
-        useradd -m -s /bin/bash builder
-        echo "builder ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-        chown -R builder:builder $GITHUB_WORKSPACE
+        # Giải phóng dung lượng ổ cứng của máy ảo GitHub
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        
+        # Cập nhật và cài đặt danh sách gói tiêu chuẩn từ ImmortalWrt (đã chuẩn hóa mkisofs -> genisoimage)
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+          g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+          libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
+          libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz genisoimage msmtp nano \
+          ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+          python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs \
+          upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+          
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
 
-    - name: Cài đặt các gói theo khuyến nghị của ImmortalWrt
-      env:
-        DEBIAN_FRONTEND: noninteractive
+    - name: Clone ImmortalWrt source code
       run: |
-        su builder -c "
-          sudo apt update -y
-          sudo apt full-upgrade -y
-          sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
-            g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
-            libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
-            libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz genisoimage msmtp nano \
-            ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
-            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs \
-            upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
-          sudo apt autoremove --purge -y
-          sudo apt clean
-        "
-
-    - name: Clone mã nguồn ImmortalWrt
-      run: |
-        su builder -c "git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt"
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH immortalwrt
 
     - name: Update & Install feeds
       working-directory: ./immortalwrt
       run: |
-        su builder -c "
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-        "
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    - name: Nạp script uci-defaults (PPPoE, WireGuard, Wi-Fi, DoH, mwan3)
+    - name: Load custom files (Nạp script uci-defaults)
       run: |
-        su builder -c "
-          if [ -d 'files' ]; then
-            mkdir -p immortalwrt/files
-            cp -r files/* immortalwrt/files/
-            chmod +x immortalwrt/files/etc/uci-defaults/*
-            echo 'Đã nạp thành công uci-defaults.'
-          fi
-        "
+        if [ -d "files" ]; then
+          mkdir -p immortalwrt/files
+          cp -r files/* immortalwrt/files/
+          chmod +x immortalwrt/files/etc/uci-defaults/*
+          echo "Đã nạp các script uci-defaults và cấp quyền thực thi."
+        fi
 
-    - name: Nạp file .config và các gói bổ sung
+    - name: Load custom configuration
       run: |
-        su builder -c "
-          [ -e $CONFIG_FILE ] && cp $CONFIG_FILE immortalwrt/.config
-          cd immortalwrt
-          
-          # Gói WireGuard
-          echo 'CONFIG_PACKAGE_kmod-wireguard=y' >> .config
-          echo 'CONFIG_PACKAGE_luci-proto-wireguard=y' >> .config
-          echo 'CONFIG_PACKAGE_luci-app-wireguard=y' >> .config
-          echo 'CONFIG_PACKAGE_wireguard-tools=y' >> .config
-          
-          # Gói DoH & Dnsmasq-full
-          echo 'CONFIG_PACKAGE_https-dns-proxy=y' >> .config
-          echo 'CONFIG_PACKAGE_luci-app-https-dns-proxy=y' >> .config
-          echo 'CONFIG_PACKAGE_dnsmasq=m' >> .config
-          echo 'CONFIG_PACKAGE_dnsmasq-full=y' >> .config
-          
-          # Gói hỗ trợ WPA3 (nếu .config gốc chưa chọn)
-          echo 'CONFIG_PACKAGE_wpad-openssl=y' >> .config
-          
-          make defconfig
-        "
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE immortalwrt/.config
+        cd immortalwrt
+        
+        # Đảm bảo các gói cho WireGuard Client được chọn
+        echo "CONFIG_PACKAGE_kmod-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-proto-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
+        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
+        
+        # Đảm bảo các gói cho DNS-over-HTTPS và Dnsmasq-full được chọn
+        echo "CONFIG_PACKAGE_https-dns-proxy=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-https-dns-proxy=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq=m" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+        
+        # Đảm bảo hỗ trợ mã hóa WPA3-SAE cho Wi-Fi 5GHz
+        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config
+        
+        make defconfig
 
-    - name: Tải xuống các gói phụ thuộc (Download packages)
+    - name: Download packages
       working-directory: ./immortalwrt
       run: |
-        su builder -c "
-          make download -j8
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-        "
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-    - name: Biên dịch Firmware (Compile)
+    - name: Compile the firmware
       working-directory: ./immortalwrt
       run: |
-        su builder -c "
-          echo 'Bắt đầu compile với $(nproc) luồng trên Debian 11...'
-          make -j$(nproc) || make -j1 || make -j1 V=s
-        "
+        echo -e "Bắt đầu compile với $(nproc) luồng..."
+        make -j$(nproc) || make -j1 || make -j1 V=s
 
-    - name: Upload Firmware hoàn chỉnh
+    - name: Upload firmware
       uses: actions/upload-artifact@v5
       with:
-        name: ImmortalWrt_Firmware_Debian11
+        name: ImmortalWrt_Firmware
         path: immortalwrt/bin/targets/
