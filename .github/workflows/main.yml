@@ -55,14 +55,14 @@ jobs:
         find feeds/ -path "*/gn/Makefile" -exec sed -i 's/ ninja / ninja -v /g' {} + 2>/dev/null || true
         find feeds/ -path "*/gn/Makefile" -exec sed -i '/Host\/Configure/a \	sed -i "s/-Werror/-Wno-error/g" $(HOST_BUILD_DIR)/build/gen.py' {} + 2>/dev/null || true
 
-    - name: Load custom files (Nạp script uci-defaults)
-      run: |
-        if [ -d "files" ]; then
-          mkdir -p immortalwrt/files
-          cp -r files/* immortalwrt/files/
-          chmod +x immortalwrt/files/etc/uci-defaults/*
-          echo "Đã nạp các script uci-defaults và cấp quyền thực thi."
-        fi
+    # - name: Load custom files (Nạp script uci-defaults)
+      # run: |
+        # if [ -d "files" ]; then
+          # mkdir -p immortalwrt/files
+          # cp -r files/* immortalwrt/files/
+          # chmod +x immortalwrt/files/etc/uci-defaults/*
+          # echo "Đã nạp các script uci-defaults và cấp quyền thực thi."
+        # fi
 
     - name: Load custom configuration
       run: |
